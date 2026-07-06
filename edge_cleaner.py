@@ -244,6 +244,38 @@ def clean_image_edges(image_path, threshold=200, delta=1.5, close_ksize=9, inpai
                 radius = int(np.ceil(r + delta))
                 cv2.circle(erase_mask, (px, py), radius, 255, -1)
                 
+
+    # 6. Detect horizontal and vertical dashed/solid lines morphologically
+    # Dilate horizontally to bridge horizontal dashes, then open to keep long horizontal segments
+    dilated_h = cv2.dilate(binary, cv2.getStructuringElement(cv2.MORPH_RECT, (45, 1)))
+    mask_h = cv2.morphologyEx(dilated_h, cv2.MORPH_OPEN, cv2.getStructuringElement(cv2.MORPH_RECT, (120, 1)))
+    num_labels_h, labeled_h = cv2.connectedComponents(mask_h)
+    for i in range(1, num_labels_h):
+        comp_mask = (labeled_h == i)
+        if np.any(comp_mask & border_mask):
+            y_indices, x_indices = np.where(comp_mask)
+            comp_h = np.max(y_indices) - np.min(y_indices) + 1
+            # Only erase if it is a thin horizontal line (height <= 35)
+            # This protects large filled shapes (e.g. circle in symbol 1)
+            if comp_h <= 35:
+                comp_mask_dilated = cv2.dilate(comp_mask.astype(np.uint8), cv2.getStructuringElement(cv2.MORPH_RECT, (5, 5)))
+                erase_mask[comp_mask_dilated > 0] = 255
+            
+    # Dilate vertically to bridge vertical dashes, then open to keep long vertical segments
+    dilated_v = cv2.dilate(binary, cv2.getStructuringElement(cv2.MORPH_RECT, (1, 45)))
+    mask_v = cv2.morphologyEx(dilated_v, cv2.MORPH_OPEN, cv2.getStructuringElement(cv2.MORPH_RECT, (1, 120)))
+    num_labels_v, labeled_v = cv2.connectedComponents(mask_v)
+    for i in range(1, num_labels_v):
+        comp_mask = (labeled_v == i)
+        if np.any(comp_mask & border_mask):
+            y_indices, x_indices = np.where(comp_mask)
+            comp_w = np.max(x_indices) - np.min(x_indices) + 1
+            # Only erase if it is a thin vertical line (width <= 35)
+            # This protects large vertical shapes (e.g. rectangle in symbol 8)
+            if comp_w <= 35:
+                comp_mask_dilated = cv2.dilate(comp_mask.astype(np.uint8), cv2.getStructuringElement(cv2.MORPH_RECT, (5, 5)))
+                erase_mask[comp_mask_dilated > 0] = 255
+            
     # Also handle separate connected components that touch the border and are small
     # (e.g. text characters 'X' or separate noise that is isolated)
     # Using relative area threshold to handle thick text characters in large images
